@@ -1,0 +1,334 @@
+---
+title: "p8130_hw5"
+author: "Zihan Lin"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(GGally)
+library(leaps)
+library(MASS) 
+library(glmnet)
+library(leaps)
+library(caret)
+library(car)
+library(psych)
+```
+## a
+```{r}
+# Load the dataset
+data(state)
+state_data <- as.data.frame(state.x77)
+
+# Compute basic summary statistics
+summary_stats <- summary(state_data)
+print("Basic Summary Statistics:")
+print(summary_stats)
+
+# Compute detailed descriptive statistics using `psych`
+detailed_stats <- psych::describe(state_data)
+print("Detailed Descriptive Statistics:")
+print(detailed_stats)
+
+# Optionally, save the statistics to a CSV file for reference
+write.csv(detailed_stats, "descriptive_statistics.csv")
+```
+
+## b
+```{r}
+# Scatter plot of Life Expectancy vs Income
+ggplot(state_data, aes(x = Income, y = `Life Exp`)) +
+  geom_point() +
+  ggtitle("Scatter Plot of Life Expectancy vs. Income") +
+  xlab("Income") +
+  ylab("Life Expectancy")
+```
+There seems to be a negative relationship between illiteracy rates and life expectancy (higher illiteracy correlates with lower life expectancy). Illiteracy values are relatively low, so no transformation is necessary here.
+```{r}
+# Scatter plot of Life Expectancy vs Illiteracy
+ggplot(state_data, aes(x = Illiteracy, y = `Life Exp`)) +
+  geom_point() +
+  ggtitle("Scatter Plot of Life Expectancy vs. Illiteracy") +
+  xlab("Illiteracy") +
+  ylab("Life Expectancy")
+```
+A slight positive trend is visible: states with higher incomes tend to have higher life expectancy. However, there might be diminishing returns for income (non-linear relationship), which suggests a log transformation of income could be beneficial.
+```{r}
+# Scatter plot of Life Expectancy vs HS Grad
+ggplot(state_data, aes(x = `HS Grad`, y = `Life Exp`)) +
+  geom_point() +
+  ggtitle("Scatter Plot of Life Expectancy vs. HS Graduation Rate") +
+  xlab("HS Graduation Rate") +
+  ylab("Life Expectancy")
+```
+A positive correlation exists between HS graduation rates and life expectancy. No obvious need for transformation here as the relationship looks linear.
+```{r}
+# Histogram of Life Expectancy
+ggplot(state_data, aes(x = `Life Exp`)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  ggtitle("Histogram of Life Expectancy") +
+  xlab("Life Expectancy") +
+  ylab("Frequency")
+```
+The distribution of life expectancy is approximately symmetric (normal). No transformation needed for life expectancy.
+```{r}
+# Histogram of Income
+ggplot(state_data, aes(x = Income)) +
+  geom_histogram(binwidth = 1000, fill = "lightgreen", color = "black") +
+  ggtitle("Histogram of Income") +
+  xlab("Income") +
+  ylab("Frequency")
+```
+Income distribution is slightly right-skewed, suggesting a potential benefit from a log transformation to normalize the data.
+```{r}
+# Boxplot for Income
+ggplot(state_data, aes(y = Income)) +
+  geom_boxplot(fill = "lightgreen") +
+  ggtitle("Boxplot of Income") +
+  ylab("Income")
+
+# Boxplot for Illiteracy
+ggplot(state_data, aes(y = Illiteracy)) +
+  geom_boxplot(fill = "lightblue") +
+  ggtitle("Boxplot of Illiteracy") +
+  ylab("Illiteracy Rate")
+```
+Income has an outlier (a state with significantly higher income). Log transformation could help reduce its influence. Illiteracy shows no outliers but has a slightly wide spread.
+
+### Transformation
+```{r}
+state_data$Log_Income <- log(state_data$Income)
+write.csv(state_data, "state_data_trans.csv", row.names = FALSE)
+```
+
+## c
+```{r}
+# Rename columns to avoid issues with spaces
+colnames(state_data)[colnames(state_data) == "Life Exp"] <- "Life_Exp"
+colnames(state_data)[colnames(state_data) == "HS Grad"] <- "HS_Grad"
+
+# Define the formula for the full model
+full_formula <- `Life_Exp` ~ Population + Log_Income + Illiteracy + Murder + `HS_Grad` + Frost + Area
+
+# Perform best subset selection
+best_subset <- regsubsets(full_formula, data = state_data, nvmax = 7)
+
+# Summary of the best subset models
+subset_summary <- summary(best_subset)
+
+# View the best model for each number of predictors
+print("Best Subset Models:")
+print(subset_summary)
+```
+The subset selection object shows models with 1 to 7 predictors were evaluated. The asterisk (*) under the variables indicates whether they were included in the model.
+```{r}
+# Plot adjusted R-squared to select the best model
+plot(subset_summary$adjr2, type = "b", xlab = "Number of Predictors", ylab = "Adjusted R-squared", 
+     main = "Adjusted R-squared for Best Subsets")
+```
+The Adjusted R-squared Plot improves as the number of predictors increases but begins to level off after 4 predictors, suggesting that adding more predictors might not significantly improve the model. The procedures do not always generate the same model, even when focusing on metrics like adjusted R-squared, Cp, or BIC. 
+
+From the best subset selection results, we can identify variables that are borderline or may have limited contributions to the model. "Population" does not appear in the best subsets for most models, suggesting it is not strongly predictive of life expectancy. "Frost" and "Area" appear in larger subsets (e.g., 6-7 predictors) but are excluded from smaller subsets, indicating they have weaker predictive power. We can discard "Population", "Frost", and "Area" as these variables show inconsistent inclusion and do not significantly improve the adjusted R-squared or other metrics. Their practical relevance to life expectancy is also less clear (e.g., Area is likely a proxy for other factors like population density).
+```{r}
+# Correlation between Illiteracy and HS Graduation Rate
+correlation <- cor(state_data$Illiteracy, state_data$`HS_Grad`)
+print(correlation)
+```
+The correlation value of -0.657 indicates a moderate-to-strong negative relationship between Illiteracy and HS Grad. This means that as Illiteracy decreases, HS Grad tends to increase, which is expected because they are measures of opposing aspects of education levels. Based on the best subset selection results, both "Illiteracy" and "HS Grad" appear together in subsets with 4 or more predictors.
+
+## d
+```{r}
+# Perform best subset selection
+best_subset <- regsubsets(Life_Exp ~ Population + Log_Income + Illiteracy + Murder + HS_Grad + Frost + Area, 
+                          data = state_data, nvmax = 7)
+
+# Function to calculate AIC and BIC for each subset
+aic_bic_calculation <- function(model_object, dataset, response_variable) {
+  # Initialize storage for AIC and BIC
+  aic_values <- numeric()
+  bic_values <- numeric()
+  
+  for (i in 1:model_object$nvmax) {
+    # Safeguard: Try to extract predictors and handle errors
+    predictors <- tryCatch({
+      names(coef(model_object, id = i))[-1] # Exclude intercept
+    }, error = function(e) {
+      print(paste("Error extracting subset size", i, "- skipping"))
+      return(NULL)
+    })
+    
+    # Skip iteration if predictors are NULL or empty
+    if (is.null(predictors) || length(predictors) == 0) {
+      print(paste("Skipping Subset Size", i, "- No Predictors"))
+      aic_values[i] <- NA
+      bic_values[i] <- NA
+      next
+    }
+    
+    # Ensure predictors exist in the dataset
+    valid_predictors <- predictors[predictors %in% colnames(dataset)]
+    
+    # Debug: Print extracted and valid predictors
+    print(paste("Subset Size:", i, "Predictors:", paste(predictors, collapse = ", ")))
+    print(paste("Valid Predictors for Subset Size", i, ":", paste(valid_predictors, collapse = ", ")))
+    
+    # Skip subset if no valid predictors
+    if (length(valid_predictors) == 0) {
+      print(paste("Skipping Subset Size", i, "- No Valid Predictors"))
+      aic_values[i] <- NA
+      bic_values[i] <- NA
+      next
+    }
+    
+    # Build formula dynamically
+    formula_subset <- as.formula(paste(response_variable, "~", paste(valid_predictors, collapse = "+")))
+    
+    # Safeguard: Fit the model and handle errors
+    model <- tryCatch({
+      lm(formula_subset, data = dataset)
+    }, error = function(e) {
+      print(paste("Error fitting model for subset size", i, "- skipping"))
+      return(NULL)
+    })
+    
+    # Skip iteration if model fitting failed
+    if (is.null(model)) {
+      aic_values[i] <- NA
+      bic_values[i] <- NA
+      next
+    }
+    
+    # Calculate AIC and BIC for the model
+    aic_values[i] <- AIC(model)
+    bic_values[i] <- BIC(model)
+  }
+  
+  # Return a data frame with the results
+  return(data.frame(Num_Predictors = 1:model_object$nvmax, AIC = aic_values, BIC = bic_values))
+}
+
+# Apply the function to calculate AIC and BIC
+criteria_results <- aic_bic_calculation(best_subset, state_data, "Life_Exp")
+
+# View results
+print("AIC and BIC Results for Each Subset:")
+print(criteria_results)
+
+# Plot AIC
+ggplot(criteria_results, aes(x = Num_Predictors, y = AIC)) +
+  geom_line() + geom_point() +
+  ggtitle("AIC for Best Subsets") +
+  xlab("Number of Predictors") +
+  ylab("AIC")
+
+# Plot BIC
+ggplot(criteria_results, aes(x = Num_Predictors, y = BIC)) +
+  geom_line() + geom_point() +
+  ggtitle("BIC for Best Subsets") +
+  xlab("Number of Predictors") +
+  ylab("BIC")
+```
+
+## e
+```{r}
+# Prepare the predictors (X) and response (y)
+X <- model.matrix(Life_Exp ~ Population + Log_Income + Illiteracy + Murder + HS_Grad + Frost + Area, 
+                  data = state_data)[, -1]  # Remove the intercept
+y <- state_data$Life_Exp
+
+# Perform LASSO regression with cross-validation
+lasso_cv <- cv.glmnet(X, y, alpha = 1, family = "gaussian")
+
+# Plot cross-validation results
+plot(lasso_cv)
+
+# Print the best lambda (minimizing cross-validated error)
+best_lambda <- lasso_cv$lambda.min
+print(paste("Best lambda (lambda.min):", best_lambda))
+
+# Print the largest lambda within 1 standard error of the minimum (simpler model)
+lambda_1se <- lasso_cv$lambda.1se
+print(paste("Lambda within 1 SE of minimum (lambda.1se):", lambda_1se))
+
+# Extract coefficients for the best lambda
+lasso_coefs <- coef(lasso_cv, s = best_lambda)
+
+# Print the coefficients
+print("LASSO Coefficients at Best Lambda:")
+print(lasso_coefs)
+
+# Perform LASSO without cross-validation for visualization
+lasso_fit <- glmnet(X, y, alpha = 1)
+
+# Plot coefficient paths
+plot(lasso_fit, xvar = "lambda", label = TRUE)
+abline(v = log(best_lambda), col = "red", lty = 2)
+abline(v = log(lambda_1se), col = "blue", lty = 2)
+legend("topright", legend = c("lambda.min", "lambda.1se"), col = c("red", "blue"), lty = 2)
+```
+
+## f
+
+From the results we got, all three methods consistently select the same 4 predictors: Population, Murder, HS_Grad, and Frost. The results from all three methods reinforce confidence in the robustness of this subset. I will say The 4-predictor model with Population, Murder, HS_Grad, and Frost is the best choice. We can see that LASSO (lambda.min), which minimizes cross-validated error, supports predictive performance and AIC/BIC penalize complexity, and LASSO further addresses multicollinearity and redundancy. 
+```{r}
+final_model <- lm(Life_Exp ~ Population + Murder + HS_Grad + Frost, data = state_data)
+summary(final_model)
+```
+
+### Check Model Assumptions
+```{r}
+# Plot residuals vs fitted values
+plot(final_model$fitted.values, residuals(final_model),
+     main = "Residuals vs Fitted",
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red")
+
+# Add a lowess smooth curve to check for non-linear patterns
+lines(lowess(final_model$fitted.values, residuals(final_model)), col = "blue")
+```
+
+```{r}
+# Q-Q plot for residuals
+qqnorm(residuals(final_model), main = "Q-Q Plot")
+qqline(residuals(final_model), col = "red")
+
+# Shapiro-Wilk test for normality
+shapiro_test <- shapiro.test(residuals(final_model))
+print(shapiro_test)
+```
+
+```{r}
+# Scale-Location plot
+plot(final_model$fitted.values, sqrt(abs(residuals(final_model))),
+     main = "Scale-Location Plot",
+     xlab = "Fitted Values", ylab = "Square Root of |Residuals|")
+abline(h = 0, col = "red")
+```
+
+```{r}
+# Variance Inflation Factor (VIF)
+vif_values <- vif(final_model)
+print(vif_values)
+```
+All assumptions of linear regression appear to be reasonably met based on the visualizations and test results. The model is well-specified and suitable for inference.
+
+### Test Model Predictive Ability Using 10-Fold Cross-Validation
+```{r}
+# Define training control with 10-fold cross-validation
+train_control <- trainControl(method = "cv", number = 10)
+
+# Fit the model using caret's train function
+cv_model <- train(Life_Exp ~ Population + Murder + HS_Grad + Frost,
+                  data = state_data,
+                  method = "lm",
+                  trControl = train_control)
+
+# Print cross-validation results
+print(cv_model)
+```
+The cross-validation results suggest that the final model performs well in predicting life expectancy. The R-squared value indicates that the model explains a significant proportion of the variance, and the RMSE and MAE values suggest that prediction errors are relatively small.
+
+### g
+The analysis explored the factors influencing life expectancy across states, focusing on identifying the best predictors from several socioeconomic and environmental variables. Using best subset selection, criterion-based methods, and LASSO regression, we identified four key predictors: Population, Murder Rate, High School Graduation Rate, and Frost Days. These variables were consistently selected as significant across different methodologies. The final model explained approximately 77% of the variability in life expectancy (R² = 0.7692) and demonstrated robust predictive performance through 10-fold cross-validation (RMSE = 0.7741). The findings suggest that reducing crime (Murder Rate) and improving education (High School Graduation Rate) could significantly improve life expectancy. Environmental factors, such as Frost Days, also play a role, though their relationship may be more complex. These results provide actionable insights into key areas for policy intervention to enhance public health outcomes.
